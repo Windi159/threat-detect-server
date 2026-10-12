@@ -35,6 +35,9 @@ def main() -> None:
     p.add_argument("--lr", type=float, default=3e-5)
     p.add_argument("--max-length", type=int, default=128)
     p.add_argument("--eval-ratio", type=float, default=0.1)
+    p.add_argument("--class-weights", action="store_true",
+                   help="클래스 빈도의 역수를 손실 가중치로 쓴다. threat이 전체의 7%%뿐이라 "
+                        "가중치 없이 학습하면 threat을 아예 예측하지 않는 쪽으로 쏠린다.")
     args = p.parse_args()
 
     from datasets import load_dataset
@@ -59,7 +62,26 @@ def main() -> None:
         preds = np.argmax(eval_pred.predictions, axis=-1)
         return {"macro_f1": f1_score(eval_pred.label_ids, preds, average="macro")}
 
-    trainer = Trainer(
+    trainer_cls = Trainer
+    if args.class_weights:
+        import torch
+
+        counts = np.bincount(ds["train"]["label"], minlength=len(LABELS))
+        weights = torch.tensor(counts.sum() / (len(LABELS) * np.maximum(counts, 1)),
+                               dtype=torch.float32)
+        print("클래스 가중치:", dict(zip(LABELS, weights.tolist())))
+
+        class WeightedTrainer(Trainer):
+            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+                labels = inputs.pop("labels")
+                outputs = model(**inputs)
+                loss = torch.nn.functional.cross_entropy(
+                    outputs.logits, labels, weight=weights.to(outputs.logits.device))
+                return (loss, outputs) if return_outputs else loss
+
+        trainer_cls = WeightedTrainer
+
+    trainer = trainer_cls(
         model=model,
         args=TrainingArguments(
             output_dir=args.output, num_train_epochs=args.epochs, learning_rate=args.lr,
