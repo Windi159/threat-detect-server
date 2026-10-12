@@ -36,7 +36,7 @@ def build_detector() -> ThreatDetector:
     s = load_settings()
     if not s.model_dir:
         log.warning("THREAT_MODEL_DIR 미설정 — 개발용 KeywordClassifier로 동작합니다")
-    return ThreatDetector(load_classifier(s.model_dir),
+    return ThreatDetector(load_classifier(s.model_dir, s.hybrid),
                           AlertSender(s.control_url, s.alert_timeout), s.threshold)
 
 

@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from typing import Protocol
 
+from . import lexicon
+
 LABELS = ("normal", "abuse", "threat")
 LABEL_KO = {"normal": "정상", "abuse": "욕설", "threat": "위협"}
 
@@ -48,24 +50,55 @@ class ModelClassifier:
 
 
 class KeywordClassifier:
-    """개발·연동 확인용 단어 사전 분류기. 학습된 모델이 준비되기 전까지만 쓴다.
+    """규칙 사전(lexicon.py) 기반 분류기. 학습된 모델이 준비되기 전까지 쓴다.
 
-    확신도는 사전에 걸리면 1.0, 아니면 정상 1.0으로 고정이라 실제 확률이 아니다.
+    확신도는 걸린 규칙에 매겨둔 가중치이지 모델이 낸 확률이 아니다. 사전에 없는 표현은
+    전혀 잡지 못하므로 실제 운영은 train.py로 학습한 ModelClassifier를 써야 한다.
     """
 
-    THREAT_WORDS = ("죽여", "죽인다", "죽일", "죽을래", "패버", "때려", "찔러", "칼로",
-                    "가만안둬", "가만안둔다", "불질러", "목졸")
-    ABUSE_WORDS = ("씨발", "시발", "ㅅㅂ", "병신", "ㅂㅅ", "개새끼", "새끼", "지랄", "좆",
-                   "미친놈", "미친년", "꺼져", "닥쳐", "엿먹어")
+    def predict(self, text: str) -> Prediction:
+        label, confidence = lexicon.score(text)
+        return Prediction(label, confidence)
+
+    def explain(self, text: str) -> dict[str, list[tuple[str, float]]]:
+        """어떤 규칙이 걸렸는지 돌려준다 — 사전을 손볼 때 쓴다."""
+        return lexicon.matches(text)
+
+
+class HybridClassifier:
+    """학습 모델과 규칙 사전을 함께 쓰고, 둘 중 더 위험한 쪽을 택한다.
+
+    둘은 서로 다른 것을 놓친다. 모델은 처음 보는 표현과 은어에 강하지만, AIHub 학습
+    데이터에 거의 없던 간접 위협("가만 안 둬", "집앞으로 찾아갈게")을 확신도 0.98로
+    정상이라고 단언한다. 사전은 그런 화법을 정확히 잡지만 적어두지 않은 표현은 전혀 못 잡는다.
+
+    안전 알람이므로 둘 중 하나라도 유해로 보면 알람을 보낸다. 다만 '무조건 합집합'은 아니다.
+    사전은 정규식이라 확신도가 가중치일 뿐이어서, 모델이 더 높은 확신으로 같은 판정을
+    내리면 모델 쪽 수치를 쓴다. 이렇게 해야 임계값 조절이 모델 확률 기준으로 일관된다.
+    """
+
+    # threat > abuse > normal 순으로 위험하다
+    _RANK = {"normal": 0, "abuse": 1, "threat": 2}
+
+    def __init__(self, model_dir: str, device: str | None = None, max_length: int = 128):
+        self.model = ModelClassifier(model_dir, device, max_length)
+        self.lexicon = KeywordClassifier()
 
     def predict(self, text: str) -> Prediction:
-        compact = "".join(text.split())
-        if any(w in compact for w in self.THREAT_WORDS):
-            return Prediction("threat", 1.0)
-        if any(w in compact for w in self.ABUSE_WORDS):
-            return Prediction("abuse", 1.0)
-        return Prediction("normal", 1.0)
+        m = self.model.predict(text)
+        r = self.lexicon.predict(text)
+        if self._RANK[r.label] > self._RANK[m.label]:
+            return r                      # 모델이 놓친 것을 사전이 잡은 경우
+        if r.label == m.label and r.label != "normal":
+            return m if m.confidence >= r.confidence else r
+        return m
+
+    def explain(self, text: str) -> dict:
+        return {"model": self.model.predict(text), "lexicon": self.lexicon.explain(text)}
 
 
-def load_classifier(model_dir: str | None) -> Classifier:
-    return ModelClassifier(model_dir) if model_dir else KeywordClassifier()
+def load_classifier(model_dir: str | None, hybrid: bool = True) -> Classifier:
+    """모델 폴더가 있으면 모델(기본은 사전 병행), 없으면 사전만 쓴다."""
+    if not model_dir:
+        return KeywordClassifier()
+    return HybridClassifier(model_dir) if hybrid else ModelClassifier(model_dir)
