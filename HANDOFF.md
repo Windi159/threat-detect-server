@@ -30,7 +30,7 @@
 | 위치 | GitHub | 브랜치 | 내용 |
 |---|---|---|---|
 | `D:\whisper_tailscale` | **없음 (로컬 전용)** | — | Whisper STT 서버 + PWA |
-| `D:\post_sh-t` | `Windi159/post_sh-t` (비공개) | `feature/whisper-stt` | 안드로이드 앱 (Kotlin) |
+| `D:\post_sh-t` | `Windi159/post_sh-t` (비공개) | `feature/thin-client` (사용 중) | 안드로이드 앱 (Kotlin) |
 | `D:\threat-detect-server` | `Windi159/threat-detect-server` (공개) | `main` | 욕설·위협 감지 서버 |
 
 > `whisper_tailscale`는 아직 git 저장소가 아닙니다. 다른 PC로 옮기려면 폴더를 복사하거나
@@ -69,29 +69,50 @@
 | `THREAT_CHECK_URL` | `http://127.0.0.1:8002/api/threat/check` | 비우면 위협 검사 안 함 |
 | `WHISPER_STUB_TEXT` | (비움) | 값이 있으면 전사를 건너뛰고 그 문장을 반환 (배선 점검용) |
 
-## 2. 안드로이드 앱 (`D:\post_sh-t`, 브랜치 `feature/whisper-stt`)
+## 2. 안드로이드 앱 (`D:\post_sh-t`)
 
-main에는 아직 머지하지 않았습니다. 커밋 4개:
+브랜치가 여러 개이고 역할이 다릅니다. **현재 쓰는 것은 `feature/thin-client`** 입니다.
+
+| 브랜치 | 상태 | 내용 |
+|---|---|---|
+| `feature/thin-client` | **사용 중** | 폰을 얇은 클라이언트로. LLM 호출을 서버에 넘기고 에코 모드 제거 |
+| `feature/whisper-echo-mode` | 유지 | STT 인식 텍스트를 글라스로 되읽는 형식. **이 형식으로 계속 진행** |
+| `feature/whisper-stt` | 기록 | Whisper STT 서버 관련 기록 (현재 서버 코드와는 다름) |
+| `feature/threat-detect-server` | 기록 | 위협 감지 서버 코드. 동명의 별도 저장소로 옮김 |
+| `main` | 기록 | thin-client 이전 앱 코드. 사용하지 않음 |
+
+### ⚠️ thin-client가 가리키는 STT 서버가 다릅니다
+
+```kotlin
+// feature/thin-client 의 UserPreferences.kt
+const val DEFAULT_STT_URL = "http://192.168.1.11:8001"
+```
+
+이 저장소(`D:\whisper_tailscale`)의 서버는 **Tailscale HTTPS + 포트 8000**인데, 사용 중인
+앱은 **사설망 192.168.1.11 포트 8001**을 봅니다. 둘은 다른 서버입니다. 앱이 이 PC의 Whisper를
+쓰게 하려면 `sttUrl`을 바꿔야 합니다 (아래 주의사항 참고).
+
+| 키 | thin-client 기본값 | 설명 |
+|---|---|---|
+| `sttUrl` | `http://192.168.1.11:8001` | STT 서버 (`/api/transcribe`) |
+| `apiUrl` | `http://175.196.239.135:8000` | LLM 서버 — **현재 꺼져 있음(ping 불가)** |
+| `userId` | (최초 실행 시 입력) | 전화번호. 위협 알람에 함께 올라갑니다 |
+
+> 기본값은 **앱 첫 설치 때만** 적용됩니다. 이후에는 SharedPreferences(`glassassist_prefs`)에
+> 저장된 값이 쓰이므로, 주소를 바꾸려면 앱 데이터를 지우고 재설치해야 합니다.
+
+### whisper-echo-mode 쪽 작업 내역 (커밋 5개)
 
 | 커밋 | 내용 |
 |---|---|
 | `bc7994e` | 질문 STT를 Whisper 서버로 전환 (`WhisperSttClient.kt` 신규), SpeechRecognizer는 폴백 |
 | `c234da3` | HTTPS 주소로 전환, 글라스 마이크 레벨에 맞춰 말끝 감지 튜닝 |
 | `7301102` | 실제 라우팅된 입력 장치 로그 (`getRoutedDevice`) |
-| `96930b8` | 에코 모드 |
+| `96930b8` | 에코 모드 (`echoStt`, 화면 길게 눌러 토글) |
 | `6050f4d` | MessageServer 본문을 UTF-8로 직접 읽기 |
 
-### 주요 설정 (`UserPreferences.kt`)
-
-| 키 | 기본값 | 설명 |
-|---|---|---|
-| `sttUrl` | `https://desktop-horuhm4.snowfinch-leaffish.ts.net` | Whisper 서버 |
-| `apiUrl` | `http://175.196.239.135:8000` | LLM 서버 (`/chat`) — **현재 꺼져 있음** |
-| `useWhisperStt` | `true` | false면 폰 내장 인식기 |
-| `echoStt` | `false` | 인식 문장을 LLM 없이 글라스로 되읽기. **화면 길게 눌러 토글** |
-
-> 기본값은 **앱 첫 설치 때만** 적용됩니다. 이후에는 SharedPreferences(`glassassist_prefs`)에
-> 저장된 값이 쓰이므로, 주소를 바꾸려면 앱 데이터를 지우고 재설치해야 합니다.
+`feature/thin-client`는 `96930b8`에서 갈라져 나와 에코 모드를 제거하고 LLM 호출을 서버로
+옮겼습니다. 에코 형식으로 계속 가신다면 두 브랜치의 정리가 필요합니다.
 
 ### 빌드
 
@@ -171,12 +192,16 @@ APK가 그 이전 버전이면 위 형식을 써야 합니다.)
 
 ## 지금 막혀 있는 것
 
-1. **LLM 서버(`175.196.239.135:8000`)가 꺼져 있습니다.** ping도 안 닿습니다. 그래서 STT가
+1. **사용 중인 앱(thin-client)이 이 PC의 Whisper 서버를 보지 않습니다.** `sttUrl`이
+   `http://192.168.1.11:8001`로 되어 있어 별도 서버를 씁니다. 이 PC 서버로 붙이려면
+   `DEFAULT_STT_URL`을 `https://desktop-horuhm4.snowfinch-leaffish.ts.net`으로 바꾸고
+   앱 데이터를 지운 뒤 재설치해야 합니다.
+2. **LLM 서버(`175.196.239.135:8000`)가 꺼져 있습니다.** ping도 안 닿습니다. 그래서 STT가
    성공해도 답변 음성이 안 나옵니다. 에코 모드를 켜면 LLM 없이도 글라스에서 소리를 들을 수 있지만,
    **에코 모드가 든 APK가 아직 폰에 설치되지 않았습니다** (USB 연결이 안 돼서).
    폰 브라우저로 `https://desktop-horuhm4.snowfinch-leaffish.ts.net/GlassAssist-whisper-debug.apk`
    를 받아 설치하면 됩니다.
-2. 폰(`s23`)이 4일째 Tailscale 오프라인입니다.
+3. 폰(`s23`)이 4일째 Tailscale 오프라인입니다.
 
 ## 다음에 할 만한 것
 
@@ -185,5 +210,5 @@ APK가 그 이전 버전이면 위 형식을 써야 합니다.)
   가장 큰 개선 여지입니다
 - 감지·관제 서버도 작업 스케줄러에 등록 (지금은 수동 실행)
 - `whisper_tailscale`를 git 저장소로 만들기
-- 앱 `feature/whisper-stt`를 main에 머지
+- 앱 브랜치 정리: 에코 형식으로 간다면 `whisper-echo-mode`와 `thin-client`를 어떻게 합칠지 결정
 - 상시 녹음: 지금은 "코비야" 뒤 질문만 전사하므로, 호출어 없이 들어오는 폭언은 감지하지 못합니다
