@@ -1,8 +1,11 @@
 ﻿# 관제 서버(9000)와 욕설·위협 감지 서버(8002)를 띄운다.
 #
-#   .\scripts\start.ps1              학습 모델 + 규칙 사전 병행 (운영 기본값)
-#   .\scripts\start.ps1 -NoModel     규칙 사전만 (모델 로딩 없이 가볍게)
-param([switch]$NoModel)
+#   .\scripts\start.ps1              규칙 사전만 (기본값)
+#   .\scripts\start.ps1 -WithModel   학습 모델 + 규칙 사전 병행
+#
+# 기본값이 사전만인 이유는 README "분류기" 절을 볼 것. 요약하면 AIHub 데이터의 위협 정의가
+# 우리 현장과 달라서, 그 데이터로 학습한 모델은 간접 위협("가만 안 둬")을 정상으로 본다.
+param([switch]$WithModel)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
@@ -18,7 +21,7 @@ Start-Sleep -Seconds 2
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $env:CONTROL_SERVER_URL = "http://127.0.0.1:9000/api/alerts"
 $env:THREAT_THRESHOLD = "0.8"     # test셋 임계값 표를 보고 정했다 (README 참고)
-if (-not $NoModel) { $env:THREAT_MODEL_DIR = "$root\models\threat-kcelectra" }
+if ($WithModel) { $env:THREAT_MODEL_DIR = "$root\models\threat-kcelectra" }
 else { Remove-Item Env:\THREAT_MODEL_DIR -ErrorAction SilentlyContinue }
 
 $control = Start-Process -FilePath "uv" -WorkingDirectory $root -WindowStyle Hidden -PassThru `
@@ -40,5 +43,5 @@ do {
 } while (-not ($a -and $b) -and (Get-Date) -lt $deadline)
 
 Write-Host "control(9000)=$a pid=$($control.Id)   threat(8002)=$b pid=$($threat.Id)"
-Write-Host "분류기: $(if ($NoModel) { '규칙 사전만' } else { '모델 + 규칙 사전 병행' })   임계값: $env:THREAT_THRESHOLD"
+Write-Host "분류기: $(if ($WithModel) { '모델 + 규칙 사전 병행' } else { '규칙 사전만' })   임계값: $env:THREAT_THRESHOLD"
 Write-Host "로그: logs\threat_$stamp.err.log"

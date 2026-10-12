@@ -127,9 +127,14 @@ APK는 265 MB(PyTorch Lite 포함)이고, 빌드 결과를 `whisper_tailscale/st
 ## 3. 욕설·위협 감지 서버 (`D:\threat-detect-server`, `main`)
 
 ```powershell
-.\scripts\start.ps1            # 관제(9000) + 감지(8002), 모델+사전 병행, 임계값 0.8
-.\scripts\start.ps1 -NoModel   # 규칙 사전만 (모델 로딩 없이)
+.\scripts\start.ps1              # 관제(9000) + 감지(8002), 규칙 사전만 (현재 기본값)
+.\scripts\start.ps1 -WithModel   # 모델 + 규칙 사전 병행
 ```
+
+> **현재 분류기는 규칙 사전 단독입니다.** 모델 없이 먼저 테스트해보려는 선택이며,
+> 커버리지가 낮다는 점을 전제로 봐야 합니다 — test셋 35,756문장 기준 위협 재현율
+> 0.083(병행은 0.773), 욕설 재현율 0.013(병행은 0.874). 잡아낸 것의 정밀도는
+> 높습니다(위협 0.80). 필요해지면 `-WithModel`로 되돌리면 됩니다.
 
 ### 모델은 저장소에 없습니다
 
