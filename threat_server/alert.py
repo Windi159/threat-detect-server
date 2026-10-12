@@ -11,15 +11,17 @@ log = logging.getLogger(__name__)
 VARIANTS = ("test", "prod")
 
 
-def build_alert(user_id: str, transcript: str, variant: str,
+def build_alert(device_id: str, user_name: str | None, transcript: str, variant: str,
                 prediction: Prediction, detected_at: datetime) -> dict:
     """알람 본문을 만든다.
 
-    일반(prod) 버전: 사용자 전화번호, 전사문, 시각만 보낸다.
+    일반(prod) 버전: 기기 ID, 사용자 이름, 전사문, 시각만 보낸다.
     테스트(test) 버전: 위에 더해 분류(욕설/위협)와 모델 확신도를 보낸다.
+    사용자 이름은 등록되지 않은 기기면 None이다.
     """
     payload = {
-        "userId": user_id,
+        "deviceId": device_id,
+        "userName": user_name,
         "transcript": transcript,
         "detectedAt": detected_at.isoformat(timespec="seconds"),
         "variant": variant,
@@ -42,5 +44,6 @@ class AlertSender:
         except httpx.HTTPError as e:
             log.error("관제 서버 알람 실패 (%s): %s", self.url, e)
             return False
-        log.info("관제 서버 알람 전송: userId=%s", payload.get("userId"))
+        log.info("관제 서버 알람 전송: deviceId=%s userName=%s",
+                 payload.get("deviceId"), payload.get("userName"))
         return True

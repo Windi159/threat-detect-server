@@ -17,7 +17,8 @@ _alerts: deque[dict] = deque(maxlen=1000)
 
 
 class Alert(BaseModel):
-    userId: str
+    deviceId: str
+    userName: str | None = None   # 등록되지 않은 기기면 비어 있다
     transcript: str
     detectedAt: datetime
     variant: str
@@ -30,7 +31,7 @@ class Alert(BaseModel):
 def receive(alert: Alert) -> dict:
     record = alert.model_dump(mode="json", exclude_none=True)
     _alerts.appendleft(record)
-    log.warning("[위협 알람] 사용자 %s: %s", alert.userId, record)
+    log.warning("[위협 알람] %s(%s): %s", alert.userName or "미등록", alert.deviceId, record)
     return {"received": True}
 
 

@@ -3,7 +3,7 @@
 글라스 착용자에게 들어온 말(전사문)에 욕설이나 위협이 있으면 관제 서버에 알립니다.
 
 ```
-폰 앱 ──WAV + userId + variant──▶ 음성 서버 /api/transcribe (Whisper)
+폰 앱 ──WAV + deviceId + variant──▶ 음성 서버 /api/transcribe (Whisper)
                                       │ 전사문
                                       ▼
                               ThreatDetector.check()   정상 / 욕설 / 위협 분류
@@ -14,7 +14,10 @@
 
 ## 사용자 구분과 버전
 
-- **사용자**: 앱을 처음 실행할 때 등록한 전화번호(`userId`)
+- **사용자**: 기기 고유 ID(`deviceId`, Android의 `ANDROID_ID`)로 구분합니다
+  - 첫 설치 때 입력받은 이름을 서버에 `기기 ID → 이름`으로 등록합니다 (`PUT /api/users/{deviceId}`)
+  - 재설치하면 앱이 기기 ID로 이름을 되찾습니다 (`GET /api/users/{deviceId}`). 없으면 404 → 다시 입력받습니다
+  - `ANDROID_ID`는 재설치해도 같고, 공장 초기화하면 바뀝니다
 - **버전**: 앱 빌드 플레이버로 나눕니다
   - `beta` 빌드 → `variant=test`
   - `prod` 빌드 → `variant=prod`
@@ -22,7 +25,8 @@
 
 | 알람 필드 | 일반(prod) | 테스트(test) |
 |---|---|---|
-| `userId` 전화번호 | ✅ | ✅ |
+| `deviceId` 기기 ID | ✅ | ✅ |
+| `userName` 사용자 이름 (미등록 기기면 `null`) | ✅ | ✅ |
 | `transcript` 전사문 | ✅ | ✅ |
 | `detectedAt` 감지 시각 | ✅ | ✅ |
 | `variant` | ✅ | ✅ |
@@ -49,18 +53,34 @@ uvicorn threat_server.app:create_app --factory --host 0.0.0.0 --port 8002
 | `CONTROL_SERVER_URL` | `http://127.0.0.1:9000/api/alerts` | 관제 서버 알람 주소 |
 | `THREAT_THRESHOLD` | `0.7` | 이 확신도 이상일 때만 알람 |
 | `ALERT_TIMEOUT` | `3.0` | 관제 서버 요청 타임아웃(초) |
+| `USER_DB_PATH` | `data/users.db` | 기기 ID → 이름 SQLite 파일 |
+
+## API
+
+| 메서드 | 경로 | 설명 |
+|---|---|---|
+| `POST` | `/api/threat/check` | `{deviceId, text, variant}` 판정. 욕설·위협이면 관제 서버로 알람 |
+| `PUT` | `/api/users/{deviceId}` | `{name}` 사용자 이름 등록·변경 |
+| `GET` | `/api/users/{deviceId}` | 등록된 이름 조회 (없으면 404) |
+| `GET` | `/health` | 상태 확인 |
+
+`/api/threat/check`는 앱이 기기 ID로 바꾸기 전까지 `userId` 필드도 `deviceId`로 받습니다.
 
 ### 확인
 
 ```bash
+curl -X PUT localhost:8002/api/users/a1b2c3d4 -H 'content-type: application/json' \
+  -d '{"name":"홍길동"}'
+
 curl -X POST localhost:8002/api/threat/check -H 'content-type: application/json' \
-  -d '{"userId":"010-1234-5678","text":"너 죽여버린다","variant":"test"}'
+  -d '{"deviceId":"a1b2c3d4","text":"너 죽여버린다","variant":"test"}'
 # {"harmful":true,"category":"위협","confidence":1.0}
 ```
 
 ## 음성 서버(/api/transcribe)에 붙이기
 
-앱([post_sh-t](https://github.com/Windi159/post_sh-t) `feature/threat-detect-server`)은 `/api/transcribe` 요청에 `userId`, `variant` 폼 필드를 함께 보냅니다.
+앱([post_sh-t](https://github.com/Windi159/post_sh-t) `feature/threat-detect-server`)은 `/api/transcribe` 요청에 사용자 ID와 `variant` 폼 필드를 함께 보냅니다.
+현재 앱은 전화번호를 `userId` 필드로 보냅니다. 기기 ID(`deviceId`)로 바꾸는 작업은 앱에 아직 반영되지 않았습니다.
 음성 서버 코드에서 전사 직후 아래처럼 부르면 됩니다.
 
 ```python
@@ -71,9 +91,10 @@ detector = build_detector()   # 서버 시작 시 한 번
 
 @app.post("/api/transcribe")
 def transcribe(background: BackgroundTasks, file: UploadFile = File(...),
-               userId: str = Form("미설정"), variant: str = Form("prod"), ...):
+               deviceId: str | None = Form(None), userId: str = Form("미설정"),
+               variant: str = Form("prod"), ...):
     text = ...  # 기존 Whisper 전사
-    det = detector.check(userId, text, variant if variant in ("test", "prod") else "prod")
+    det = detector.check(deviceId or userId, text, variant if variant in ("test", "prod") else "prod")
     if det.harmful:
         background.add_task(detector.send_alert, det)   # 폰 응답을 늦추지 않는다
     ...  # 기존 응답 그대로

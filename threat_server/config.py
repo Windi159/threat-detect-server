@@ -13,6 +13,8 @@ class Settings:
     threshold: float
     # 관제 서버 요청 타임아웃(초)
     alert_timeout: float
+    # 기기 ID → 사용자 이름 DB 파일
+    user_db_path: str
 
 
 def load_settings() -> Settings:
@@ -21,4 +23,5 @@ def load_settings() -> Settings:
         control_url=os.getenv("CONTROL_SERVER_URL", "http://127.0.0.1:9000/api/alerts"),
         threshold=float(os.getenv("THREAT_THRESHOLD", "0.7")),
         alert_timeout=float(os.getenv("ALERT_TIMEOUT", "3.0")),
+        user_db_path=os.getenv("USER_DB_PATH", "data/users.db"),
     )

@@ -4,6 +4,7 @@ from datetime import datetime
 
 from .alert import VARIANTS, AlertSender, build_alert
 from .classifier import Classifier, Prediction
+from .users import UserStore
 
 
 @dataclass(frozen=True)
@@ -14,12 +15,14 @@ class Detection:
 
 
 class ThreatDetector:
-    def __init__(self, classifier: Classifier, sender: AlertSender, threshold: float = 0.7):
+    def __init__(self, classifier: Classifier, sender: AlertSender, users: UserStore,
+                 threshold: float = 0.7):
         self.classifier = classifier
         self.sender = sender
+        self.users = users
         self.threshold = threshold
 
-    def check(self, user_id: str, text: str, variant: str) -> Detection:
+    def check(self, device_id: str, text: str, variant: str) -> Detection:
         if variant not in VARIANTS:
             raise ValueError(f"variant는 {VARIANTS} 중 하나여야 합니다: {variant!r}")
         text = text.strip()
@@ -27,8 +30,11 @@ class ThreatDetector:
             return Detection(Prediction("normal", 1.0), False, None)
         pred = self.classifier.predict(text)
         harmful = pred.is_harmful and pred.confidence >= self.threshold
-        alert = build_alert(user_id, text, variant, pred, datetime.now().astimezone()) if harmful else None
-        return Detection(pred, harmful, alert)
+        if not harmful:
+            return Detection(pred, False, None)
+        alert = build_alert(device_id, self.users.get_name(device_id), text, variant, pred,
+                            datetime.now().astimezone())
+        return Detection(pred, True, alert)
 
     def send_alert(self, detection: Detection) -> bool:
         return detection.alert is not None and self.sender.send(detection.alert)
