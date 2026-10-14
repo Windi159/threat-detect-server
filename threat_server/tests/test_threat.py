@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from threat_server.app import create_app
@@ -55,18 +57,43 @@ def test_unknown_variant_rejected():
     raise AssertionError("ValueError가 나야 합니다")
 
 
-def test_endpoint_sends_alert_in_background():
-    d = detector("abuse", 0.95)
-    client = TestClient(create_app(d))
+def ndjson(r) -> dict:
+    assert r.headers["content-type"].startswith("application/x-ndjson")
+    lines = r.text.splitlines()
+    assert len(lines) == 1 and r.text.endswith("\n")
+    obj = json.loads(lines[0])
+    assert isinstance(obj.pop("elapsed"), float)
+    return obj
 
-    r = client.post("/api/threat/check", json={"userId": "010-1", "text": "욕", "variant": "test"})
-    assert r.json() == {"harmful": True, "category": "욕설", "confidence": 0.95}
+
+def test_endpoint_returns_ndjson_threat_line():
+    client = TestClient(create_app(detector("abuse", 0.95), alert_enabled=False))
+
+    r = client.post("/api/threat/check", json={"userId": "010-1", "text": " 욕 ", "variant": "test"})
+    assert ndjson(r) == {"type": "threat", "text": "욕", "userId": "010-1",
+                         "category": "욕설", "confidence": 0.95}
 
     r = client.post("/api/threat/check", json={"userId": "010-2", "text": "욕", "variant": "prod"})
-    assert r.json() == {"harmful": True}
+    assert ndjson(r) == {"type": "threat", "text": "욕", "userId": "010-2"}
 
-    assert [a["userId"] for a in d.sender.sent] == ["010-1", "010-2"]
-    assert "confidence" not in d.sender.sent[1]
+
+def test_endpoint_returns_ndjson_safe_line():
+    client = TestClient(create_app(detector("normal", 0.99), alert_enabled=False))
+    r = client.post("/api/threat/check", json={"userId": "010-1", "text": "화장실 어디예요", "variant": "test"})
+    assert ndjson(r) == {"type": "safe", "text": "화장실 어디예요"}
+
+
+def test_alert_is_off_by_default_and_sent_when_enabled(monkeypatch):
+    monkeypatch.delenv("CONTROL_ALERT_ENABLED", raising=False)
+    off = detector("threat", 0.95)
+    TestClient(create_app(off)).post("/api/threat/check", json={"userId": "010-1", "text": "위협"})
+    assert off.sender.sent == []
+
+    on = detector("threat", 0.95)
+    TestClient(create_app(on, alert_enabled=True)).post(
+        "/api/threat/check", json={"userId": "010-1", "text": "위협", "variant": "prod"})
+    assert [a["userId"] for a in on.sender.sent] == ["010-1"]
+    assert "confidence" not in on.sender.sent[0]
 
 
 def test_keyword_classifier():

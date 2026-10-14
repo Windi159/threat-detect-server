@@ -15,6 +15,8 @@ class Settings:
     alert_timeout: float
     # 모델과 규칙 사전을 함께 쓸지. 끄면 모델만 쓴다 (모델이 없으면 어차피 사전만 쓴다).
     hybrid: bool
+    # 위협 판정 시 관제 서버로 알람을 보낼지. 관제 연동 전까지는 꺼 둔다.
+    alert_enabled: bool
 
 
 def load_settings() -> Settings:
@@ -24,4 +26,5 @@ def load_settings() -> Settings:
         threshold=float(os.getenv("THREAT_THRESHOLD", "0.7")),
         alert_timeout=float(os.getenv("ALERT_TIMEOUT", "3.0")),
         hybrid=os.getenv("THREAT_HYBRID", "1").lower() not in ("0", "false", "no"),
+        alert_enabled=os.getenv("CONTROL_ALERT_ENABLED", "0").lower() in ("1", "true", "yes"),
     )

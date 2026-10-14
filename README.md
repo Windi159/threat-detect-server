@@ -50,12 +50,14 @@ uvicorn threat_server.app:create_app --factory --host 0.0.0.0 --port 8002
 | `CONTROL_SERVER_URL` | `http://127.0.0.1:9000/api/alerts` | 관제 서버 알람 주소 |
 | `THREAT_THRESHOLD` | `0.7` | 이 확신도 이상일 때만 알람 (운영 권장 `0.8`, 아래 표 참고) |
 | `ALERT_TIMEOUT` | `3.0` | 관제 서버 요청 타임아웃(초) |
+| `CONTROL_ALERT_ENABLED` | `0` | `1`이면 위협 판정 시 관제 서버로 알람을 보낸다. 관제 연동 전이라 기본은 꺼 둔다 |
 
 윈도우에서는 스크립트 하나로 띄울 수 있다.
 
 ```powershell
 .\scripts\start.ps1              # 규칙 사전만 (기본값), 임계값 0.8
 .\scripts\start.ps1 -WithModel   # 모델 + 규칙 사전 병행
+.\scripts\start.ps1 -WithAlert   # 관제 서버 알람 켜기 (기본은 꺼짐)
 ```
 
 ### 확인
@@ -63,31 +65,47 @@ uvicorn threat_server.app:create_app --factory --host 0.0.0.0 --port 8002
 ```bash
 curl -X POST localhost:8002/api/threat/check -H 'content-type: application/json' \
   -d '{"userId":"010-1234-5678","text":"너 죽여버린다","variant":"test"}'
-# {"harmful":true,"category":"위협","confidence":1.0}
+# {"type":"threat","text":"너 죽여버린다","userId":"010-1234-5678","category":"위협","confidence":1.0,"elapsed":0.001}
 ```
 
-## 음성 서버(/api/transcribe)에 붙이기
+## STT 서버와 주고받는 형식
 
-앱([post_sh-t](https://github.com/Windi159/post_sh-t) `feature/threat-detect-server`)은 `/api/transcribe` 요청에 `userId`, `variant` 폼 필드를 함께 보냅니다.
-음성 서버 코드에서 전사 직후 아래처럼 부르면 됩니다.
+STT 서버(`whisper_server`)는 Whisper 전사가 끝나면 전사문을 이 서버로 보내고, 응답을 보고 LLM 호출 여부를 정합니다.
 
-```python
-from fastapi import BackgroundTasks, File, Form, UploadFile
-from threat_server.app import build_detector
-
-detector = build_detector()   # 서버 시작 시 한 번
-
-@app.post("/api/transcribe")
-def transcribe(background: BackgroundTasks, file: UploadFile = File(...),
-               userId: str = Form("미설정"), variant: str = Form("prod"), ...):
-    text = ...  # 기존 Whisper 전사
-    det = detector.check(userId, text, variant if variant in ("test", "prod") else "prod")
-    if det.harmful:
-        background.add_task(detector.send_alert, det)   # 폰 응답을 늦추지 않는다
-    ...  # 기존 응답 그대로
+```
+폰 ──WAV + userId + variant──▶ STT 서버 /api/transcribe
+                                 │ 전사문
+                                 ▼
+                   POST /api/threat/check  {"userId","text","variant"}
+                                 │ NDJSON 한 줄
+                 ┌───────────────┴───────────────┐
+           {"type":"safe"}                 {"type":"threat"}
+           LLM 호출 → 답변                  LLM 건너뜀
+                                           (관제 알람: CONTROL_ALERT_ENABLED=1일 때만)
 ```
 
-별도 프로세스로 둘 경우에는 음성 서버가 `POST /api/threat/check`를 호출하면 됩니다.
+### 요청
+
+```json
+{"userId": "010-1234-5678", "text": "<전사문>", "variant": "test"}
+```
+
+### 응답 — NDJSON (`application/x-ndjson`, 한 줄)
+
+STT 서버의 `/ws/live` 메시지와 같은 `{"type": ..., "text": ...}` 구조입니다.
+
+| `type` | 의미 | 필드 |
+|---|---|---|
+| `safe` | 이상 없음 | `text`, `elapsed` |
+| `threat` | 욕설 또는 위협 감지 | `text`, `userId`, `elapsed` + 테스트 버전이면 `category`(욕설/위협), `confidence` |
+
+```
+{"type":"safe","text":"화장실 어디예요","elapsed":0.002}
+{"type":"threat","text":"너 죽여버린다","userId":"010-1234-5678","category":"위협","confidence":0.93,"elapsed":0.004}
+```
+
+- `text`는 앞뒤 공백을 뗀 전사문입니다. `elapsed`는 판정에 걸린 시간(초)입니다.
+- 욕설도 `threat`로 묶습니다. 무엇이었는지는 테스트 버전의 `category`로 구분합니다.
 
 ## 분류기
 
